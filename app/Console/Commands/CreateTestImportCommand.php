@@ -86,7 +86,7 @@ class CreateTestImportCommand extends Command
         $filenameOriginal = basename($filePath);
         $ext = pathinfo($filenameOriginal, PATHINFO_EXTENSION) ?: $fileType;
 
-        $userId = User::first()?->id ?? 0;
+        $userId = User::query()->value('id');
 
         $import = SupplierImport::create([
             'supplier_id' => $supplier->id,

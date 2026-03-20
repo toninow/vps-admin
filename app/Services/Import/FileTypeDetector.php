@@ -74,7 +74,7 @@ class FileTypeDetector
      */
     public function detectFromPath(string $path): string
     {
-        if (! file_exists($path) || ! is_readable($path)) {
+        if (! is_file($path) || ! file_exists($path) || ! is_readable($path)) {
             return self::TYPE_CSV;
         }
 

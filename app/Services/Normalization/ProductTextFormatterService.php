@@ -133,6 +133,7 @@ class ProductTextFormatterService
     {
         $value = $this->repairMojibake((string) $value);
         $value = html_entity_decode((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = $this->stripMojibakeArtifacts($value);
         $value = strip_tags($value);
         $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/u', ' ', $value) ?? $value;
         $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
@@ -202,15 +203,19 @@ class ProductTextFormatterService
         return $this->cleanProductNameText(implode('', $parts), 255);
     }
 
-    public function formatCharacteristics(?string $description): string
+    public function formatCharacteristics(?string $description, ?string $fallbackName = null): string
     {
-        $description = html_entity_decode((string) $description, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $description = strip_tags($description);
+        $description = $this->cleanInlineText($description, 4000);
+        $fallbackName = $this->cleanInlineText($fallbackName, 1000);
         $description = preg_replace('/^caracter[ií]sticas:\s*/iu', '', $description) ?? $description;
         $description = trim((string) $description);
 
         if ($description === '') {
-            return '';
+            $description = $fallbackName;
+        }
+
+        if ($description === '') {
+            return 'Características:';
         }
 
         $items = collect(preg_split('/\s*(?:•|;|\r\n|\r|\n)+\s*/u', $description) ?: [])
@@ -218,8 +223,15 @@ class ProductTextFormatterService
             ->filter()
             ->values();
 
-        if ($items->count() <= 1) {
-            return $description;
+        if ($items->isEmpty()) {
+            $items = collect([$fallbackName !== '' ? $fallbackName : $description]);
+        } elseif ($items->count() === 1) {
+            $single = (string) $items->first();
+            if ($single === '') {
+                $single = $fallbackName !== '' ? $fallbackName : $description;
+            }
+
+            $items = collect([$single]);
         }
 
         return "Características:\n" . $items
@@ -632,9 +644,53 @@ class ProductTextFormatterService
             return $value;
         }
 
-        $converted = @mb_convert_encoding($value, 'UTF-8', 'ISO-8859-1');
+        $best = $value;
+        $bestScore = $this->mojibakeScore($value);
 
-        return is_string($converted) && $converted !== '' ? $converted : $value;
+        foreach (['ISO-8859-1', 'Windows-1252', 'CP1252'] as $encoding) {
+            $candidate = $value;
+
+            for ($i = 0; $i < 3; $i++) {
+                $converted = @mb_convert_encoding($candidate, 'UTF-8', $encoding);
+                if (! is_string($converted) || $converted === '') {
+                    break;
+                }
+
+                $candidate = $converted;
+                $score = $this->mojibakeScore($candidate);
+
+                if ($score < $bestScore) {
+                    $best = $candidate;
+                    $bestScore = $score;
+                }
+
+                if ($score === 0) {
+                    break;
+                }
+            }
+        }
+
+        return $best;
+    }
+
+    protected function mojibakeScore(string $value): int
+    {
+        preg_match_all('/(?:Ã.|Â.|â[\x80-\xBF]|Ã|Â)/u', $value, $matches);
+
+        return count($matches[0] ?? []);
+    }
+
+    protected function stripMojibakeArtifacts(string $value): string
+    {
+        if ($this->mojibakeScore($value) < 2) {
+            return $value;
+        }
+
+        $cleaned = preg_replace('/(?:Ã.|Â.|â[\x80-\xBF]|Ã|Â){2,}/u', ' ', $value) ?? $value;
+        $cleaned = preg_replace('/(?:Ã.|Â.|â[\x80-\xBF]|Ã|Â)/u', ' ', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\s+/u', ' ', $cleaned) ?? $cleaned;
+
+        return trim($cleaned);
     }
 
     protected function stripSupplierReferenceArtifact(string $text, string $supplierReference): string

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\MasterProduct;
 use App\Models\Supplier;
+use App\Services\Export\MasterApprovalService;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Collection;
@@ -44,16 +45,24 @@ class MasterProductController extends Controller
         return view('products.master.show', compact('masterProduct'));
     }
 
-    public function approve(Request $request, MasterProduct $masterProduct): RedirectResponse
+    public function approve(
+        Request $request,
+        MasterProduct $masterProduct,
+        MasterApprovalService $masterApprovalService
+    ): RedirectResponse
     {
         $this->authorize('approve', $masterProduct);
 
+        $approvable = $masterApprovalService->collectApprovableIds([$masterProduct->id], true, null, 1);
+
+        if ($approvable->isEmpty()) {
+            return redirect()
+                ->back()
+                ->withErrors(['approve' => 'Este maestro no cumple todavía la exportación real y no puede aprobarse.']);
+        }
+
         if (! $masterProduct->is_approved) {
-            $masterProduct->update([
-                'is_approved' => true,
-                'approved_at' => now(),
-                'approved_by_id' => $request->user()->id,
-            ]);
+            $masterApprovalService->approve([$masterProduct->id], $request->user()->id);
         }
 
         return redirect()
@@ -88,7 +97,7 @@ class MasterProductController extends Controller
         return redirect()->route('products.master.index')->with('status', "Producto maestro eliminado: {$name}.");
     }
 
-    public function bulkApprove(Request $request): RedirectResponse
+    public function bulkApprove(Request $request, MasterApprovalService $masterApprovalService): RedirectResponse
     {
         abort_unless($request->user()->can('master_products.approve'), 403);
 
@@ -99,15 +108,20 @@ class MasterProductController extends Controller
             return redirect()->back()->withErrors(['bulk' => 'No se seleccionó ningún maestro para aprobar.']);
         }
 
-        MasterProduct::query()
-            ->whereIn('id', $masters->pluck('id'))
-            ->update([
-                'is_approved' => true,
-                'approved_at' => now(),
-                'approved_by_id' => $request->user()->id,
-            ]);
+        $approvedIds = $masterApprovalService->collectApprovableIds($masters->pluck('id')->all());
+        $approvedCount = $masterApprovalService->approve($approvedIds, $request->user()->id);
+        $skippedCount = $count - $approvedCount;
 
-        return redirect()->back()->with('status', "Maestros aprobados: {$count}.");
+        if ($approvedCount === 0) {
+            return redirect()->back()->withErrors(['bulk' => 'Ninguno de los maestros seleccionados cumple la exportación real para ser aprobado.']);
+        }
+
+        $message = "Maestros aprobados: {$approvedCount}.";
+        if ($skippedCount > 0) {
+            $message .= " Omitidos por no ser exportables aún: {$skippedCount}.";
+        }
+
+        return redirect()->back()->with('status', $message);
     }
 
     public function bulkUnapprove(Request $request): RedirectResponse

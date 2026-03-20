@@ -87,6 +87,11 @@ class MpsfpSupplierController extends Controller
     {
         $this->ensureMpsfpAbility($project, 'proveedores', 'edit');
 
+        $supplier->loadCount(['supplierImports', 'normalizedProducts']);
+        $supplier->load([
+            'supplierImports' => fn ($query) => $query->latest()->take(3),
+        ]);
+
         return view('suppliers.edit', [
             'supplier' => $supplier,
             'mpsfpProject' => $project,

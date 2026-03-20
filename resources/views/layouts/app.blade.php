@@ -71,8 +71,25 @@
         .animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes mpIndeterminate {
+            0% { transform: translateX(-65%); width: 30%; }
+            50% { transform: translateX(45%); width: 42%; }
+            100% { transform: translateX(240%); width: 30%; }
+        }
         .card-hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
         .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05); }
+        .mp-progress-indeterminate {
+            position: relative;
+            overflow: hidden;
+        }
+        .mp-progress-indeterminate::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, rgba(230, 0, 126, 0.15) 0%, rgba(230, 0, 126, 0.9) 45%, rgba(230, 0, 126, 0.15) 100%);
+            border-radius: inherit;
+            animation: mpIndeterminate 1.15s ease-in-out infinite;
+        }
         .btn-primary {
             display: inline-flex;
             align-items: center;

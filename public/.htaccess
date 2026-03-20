@@ -1,3 +1,15 @@
+<IfModule mod_php8.c>
+    php_value upload_max_filesize 512M
+    php_value post_max_size 520M
+    php_value max_file_uploads 50
+</IfModule>
+
+<IfModule mod_php.c>
+    php_value upload_max_filesize 512M
+    php_value post_max_size 520M
+    php_value max_file_uploads 50
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes

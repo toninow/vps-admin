@@ -54,7 +54,7 @@ class AdvancedNormalizationService
                 $changed = true;
             }
 
-            $description = $this->normalizeDescription($product->description ?? '');
+            $description = $this->normalizeDescription($product->description ?? '', $name);
             if ($description !== (string) $product->description) {
                 $product->description = $description ?: null;
                 $changed = true;
@@ -134,9 +134,9 @@ class AdvancedNormalizationService
         return $this->textFormatter->buildSummary($value, $fallbackName);
     }
 
-    public function normalizeDescription(string $value): string
+    public function normalizeDescription(string $value, string $fallbackName = ''): string
     {
-        return $this->textFormatter->formatCharacteristics($value);
+        return $this->textFormatter->formatCharacteristics($value, $fallbackName);
     }
 
     public function normalizeBrand(string $value): string

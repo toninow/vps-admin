@@ -10,6 +10,7 @@ use App\Models\ProductCategorySuggestion;
 use App\Models\Project;
 use App\Models\Supplier;
 use App\Services\Categories\CategoryPathBuilderService;
+use App\Services\Export\MasterApprovalService;
 use App\Services\Export\PrestashopProductCsvService;
 use App\Services\Normalization\ImageUrlCleanerService;
 use Illuminate\Http\RedirectResponse;
@@ -320,13 +321,27 @@ class MpsfpCatalogController extends Controller
 
         $products = $this->selectedNormalizedProducts($request);
         $applied = 0;
+        $skippedAmbiguous = 0;
 
         foreach ($products as $product) {
-            $suggestion = $product->productCategorySuggestions()
+            $topScore = $product->productCategorySuggestions()->max('score');
+
+            if ($topScore === null) {
+                continue;
+            }
+
+            $topSuggestions = $product->productCategorySuggestions()
                 ->with('category')
-                ->orderByDesc('score')
+                ->where('score', $topScore)
                 ->orderBy('id')
-                ->first();
+                ->get();
+
+            if ($topSuggestions->count() !== 1) {
+                $skippedAmbiguous++;
+                continue;
+            }
+
+            $suggestion = $topSuggestions->first();
 
             if (! $suggestion || ! $suggestion->category) {
                 continue;
@@ -360,10 +375,20 @@ class MpsfpCatalogController extends Controller
         }
 
         if ($applied === 0) {
-            return redirect()->back()->withErrors(['bulk' => 'No se pudo aplicar ninguna sugerencia de categoría en la selección actual.']);
+            $error = 'No se pudo aplicar ninguna sugerencia de categoría en la selección actual.';
+            if ($skippedAmbiguous > 0) {
+                $error .= " Hay {$skippedAmbiguous} productos con empate en la mejor sugerencia.";
+            }
+
+            return redirect()->back()->withErrors(['bulk' => $error]);
         }
 
-        return redirect()->back()->with('status', "Sugerencias de categoría aplicadas: {$applied}.");
+        $status = "Sugerencias de categoría aplicadas: {$applied}.";
+        if ($skippedAmbiguous > 0) {
+            $status .= " Ambiguas sin aplicar: {$skippedAmbiguous}.";
+        }
+
+        return redirect()->back()->with('status', $status);
     }
 
     public function normalizedDestroy(Project $project, NormalizedProduct $normalizedProduct): RedirectResponse
@@ -425,22 +450,33 @@ class MpsfpCatalogController extends Controller
         ]);
     }
 
-    public function masterApprove(Project $project, Request $request, MasterProduct $masterProduct): RedirectResponse
+    public function masterApprove(
+        Project $project,
+        Request $request,
+        MasterProduct $masterProduct,
+        MasterApprovalService $masterApprovalService
+    ): RedirectResponse
     {
         $this->ensureMpsfpAbility($project, 'maestros', 'approve');
 
+        $approvable = $masterApprovalService->collectApprovableIds([$masterProduct->id], true, null, 1);
+
+        if ($approvable->isEmpty()) {
+            return redirect()->back()->withErrors(['approve' => 'Este maestro no cumple todavía la exportación real y no puede aprobarse.']);
+        }
+
         if (! $masterProduct->is_approved) {
-            $masterProduct->update([
-                'is_approved' => true,
-                'approved_at' => now(),
-                'approved_by_id' => $request->user()->id,
-            ]);
+            $masterApprovalService->approve([$masterProduct->id], $request->user()->id);
         }
 
         return redirect()->back()->with('status', 'Producto maestro aprobado para exportación.');
     }
 
-    public function masterBulkApprove(Project $project, Request $request): RedirectResponse
+    public function masterBulkApprove(
+        Project $project,
+        Request $request,
+        MasterApprovalService $masterApprovalService
+    ): RedirectResponse
     {
         $this->ensureMpsfpAbility($project, 'maestros', 'approve');
 
@@ -451,15 +487,20 @@ class MpsfpCatalogController extends Controller
             return redirect()->back()->withErrors(['bulk' => 'No se seleccionó ningún maestro para aprobar.']);
         }
 
-        MasterProduct::query()
-            ->whereIn('id', $masters->pluck('id'))
-            ->update([
-                'is_approved' => true,
-                'approved_at' => now(),
-                'approved_by_id' => $request->user()->id,
-            ]);
+        $approvedIds = $masterApprovalService->collectApprovableIds($masters->pluck('id')->all());
+        $approvedCount = $masterApprovalService->approve($approvedIds, $request->user()->id);
+        $skippedCount = $count - $approvedCount;
 
-        return redirect()->back()->with('status', "Maestros aprobados: {$count}.");
+        if ($approvedCount === 0) {
+            return redirect()->back()->withErrors(['bulk' => 'Ninguno de los maestros seleccionados cumple la exportación real para ser aprobado.']);
+        }
+
+        $message = "Maestros aprobados: {$approvedCount}.";
+        if ($skippedCount > 0) {
+            $message .= " Omitidos por no ser exportables aún: {$skippedCount}.";
+        }
+
+        return redirect()->back()->with('status', $message);
     }
 
     public function masterUnapprove(Project $project, MasterProduct $masterProduct): RedirectResponse

@@ -104,7 +104,10 @@ class PrestashopProductCsvService
             $salePriceIncl = null;
         }
 
-        $formattedCharacteristics = $this->textFormatter->formatCharacteristics($masterProduct->description);
+        $formattedCharacteristics = $this->textFormatter->formatCharacteristics(
+            $masterProduct->description,
+            $masterProduct->name
+        );
 
         $blockingWarnings = collect($warnings)->contains(fn (string $warning) => in_array($warning, [
             'Falta precio de venta para PrestaShop.',

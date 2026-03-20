@@ -64,7 +64,8 @@ class InitialProjectSeeder extends Seeder
             ]
         );
 
-        $super = User::where('email', 'admin@mpadmin.local')->first();
+        $super = User::where('email', 'admin@servidormp.com')->first()
+            ?? User::where('email', 'admin@mpadmin.local')->first();
         if ($super) {
             // Asignar acceso del superadmin al proyecto inicial y al MPSFP
             $project->users()->syncWithoutDetaching([

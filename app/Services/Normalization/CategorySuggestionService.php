@@ -88,6 +88,37 @@ class CategorySuggestionService
         'estuche',
     ];
 
+    protected const STRING_FAMILY_TOKENS = [
+        'guitarra',
+        'bajo',
+        'ukelele',
+        'mandolina',
+        'banjo',
+        'violin',
+        'violonchelo',
+        'cuerda',
+    ];
+
+    protected const WIND_FAMILY_TOKENS = [
+        'saxofon',
+        'clarinete',
+        'flauta',
+        'dulce',
+        'trompeta',
+        'tuba',
+        'viento',
+        'metal',
+    ];
+
+    protected const AMBIGUOUS_REGISTER_TOKENS = [
+        'soprano',
+        'alto',
+        'tenor',
+        'baritono',
+        'baritone',
+        'contralto',
+    ];
+
     protected static ?array $tokenCanonicalMap = null;
 
     public function __construct(
@@ -251,6 +282,10 @@ class CategorySuggestionService
         $scores = [];
 
         foreach ($categoryEntries as $categoryId => $entry) {
+            if ($this->isConflictingFamilyMatch($entry, $search)) {
+                continue;
+            }
+
             $routeSegmentMatches = count(array_intersect($search['route_segments'], $entry['path_segments']));
             $ownRouteMatches = count(array_intersect($search['route_tokens'], $entry['own_tokens']));
             $ownProductMatches = count(array_intersect($search['product_tokens'], $entry['own_tokens']));
@@ -307,6 +342,49 @@ class CategorySuggestionService
         });
 
         return array_slice($scores, 0, 5, true);
+    }
+
+    /**
+     * @param  array{
+     *   category: Category,
+     *   path_segments: array<int, string>,
+     *   own_segment: string,
+     *   own_tokens: array<int, string>,
+     *   path_tokens: array<int, string>,
+     *   depth: int
+     * } $entry
+     * @param  array{route_segments: array<int, string>, route_tokens: array<int, string>, product_tokens: array<int, string>, product_text: string}  $search
+     */
+    protected function isConflictingFamilyMatch(array $entry, array $search): bool
+    {
+        $searchTokens = array_values(array_unique(array_merge($search['route_tokens'], $search['product_tokens'])));
+        $categoryTokens = array_values(array_unique(array_merge($entry['own_tokens'], $entry['path_tokens'])));
+
+        $searchHasString = $this->hasAnyToken($searchTokens, self::STRING_FAMILY_TOKENS);
+        $searchHasWind = $this->hasAnyToken($searchTokens, self::WIND_FAMILY_TOKENS);
+        $categoryHasString = $this->hasAnyToken($categoryTokens, self::STRING_FAMILY_TOKENS);
+        $categoryHasWind = $this->hasAnyToken($categoryTokens, self::WIND_FAMILY_TOKENS);
+        $categoryHasAmbiguousRegister = $this->hasAnyToken($entry['own_tokens'], self::AMBIGUOUS_REGISTER_TOKENS)
+            || $this->hasAnyToken($categoryTokens, self::AMBIGUOUS_REGISTER_TOKENS);
+
+        if ($searchHasString && ! $searchHasWind && $categoryHasWind && ! $categoryHasString) {
+            return true;
+        }
+
+        if ($searchHasWind && ! $searchHasString && $categoryHasString && ! $categoryHasWind) {
+            return true;
+        }
+
+        if (
+            $categoryHasAmbiguousRegister
+            && $categoryHasWind
+            && $searchHasString
+            && ! $searchHasWind
+        ) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -370,6 +448,15 @@ class CategorySuggestionService
         }
 
         return true;
+    }
+
+    /**
+     * @param  array<int, string>  $haystack
+     * @param  array<int, string>  $needles
+     */
+    protected function hasAnyToken(array $haystack, array $needles): bool
+    {
+        return array_intersect($haystack, $needles) !== [];
     }
 
     /**

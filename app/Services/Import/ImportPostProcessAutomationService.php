@@ -2,14 +2,19 @@
 
 namespace App\Services\Import;
 
-use App\Models\MasterProduct;
 use App\Models\ProductCategorySuggestion;
 use App\Models\ProductEanIssue;
 use App\Models\SupplierImport;
+use App\Services\Export\MasterApprovalService;
 use Illuminate\Support\Facades\DB;
 
 class ImportPostProcessAutomationService
 {
+    public function __construct(
+        protected MasterApprovalService $masterApprovalService,
+    ) {
+    }
+
     /**
      * Sincroniza tablas auxiliares con los maestros ya creados y aprueba
      * automáticamente los maestros seguros del lote.
@@ -20,7 +25,8 @@ class ImportPostProcessAutomationService
      *   synced_ean_issues:int,
      *   synced_category_suggestions:int,
      *   approval_candidates:int,
-     *   approved_masters:int
+     *   approved_masters:int,
+     *   revoked_masters:int
      * }
      */
     public function finalizeImport(SupplierImport $import, ?callable $progressCallback = null): array
@@ -36,6 +42,7 @@ class ImportPostProcessAutomationService
                 'synced_category_suggestions' => 0,
                 'approval_candidates' => 0,
                 'approved_masters' => 0,
+                'revoked_masters' => 0,
             ];
         }
 
@@ -82,41 +89,25 @@ class ImportPostProcessAutomationService
             $progressCallback
         );
 
-        $approvalQuery = MasterProduct::query()
-            ->whereIn('id', $masterIds)
-            ->where('is_approved', false)
-            ->whereNotNull('category_id')
-            ->whereIn('category_status', ['suggested', 'confirmed'])
-            ->whereNotNull('price_tax_incl')
-            ->whereNotNull('cost_price')
-            ->whereColumn('price_tax_incl', '>=', 'cost_price')
-            ->whereDoesntHave('normalizedProducts.productEanIssues', function ($query) {
-                $query->whereNull('resolved_at');
-            });
+        $approvalCandidates = $this->masterApprovalService
+            ->collectApprovableIds($masterIds, true)
+            ->values();
+        $approvedCount = $this->masterApprovalService->approve($approvalCandidates);
 
-        $approvalCandidates = (clone $approvalQuery)->count();
-        $approvedIds = (clone $approvalQuery)->pluck('id');
-
-        if ($approvedIds->isNotEmpty()) {
-            MasterProduct::query()
-                ->whereIn('id', $approvedIds)
-                ->update([
-                    'is_approved' => true,
-                    'approved_at' => now(),
-                    'approved_by_id' => null,
-                ]);
-        }
-
-        $approvedCount = $approvedIds->count();
+        $revokableIds = $this->masterApprovalService
+            ->collectRevokableApprovedIds($masterIds)
+            ->values();
+        $revokedCount = $this->masterApprovalService->revoke($revokableIds);
 
         $this->reportProgress(
             3,
             $steps,
             $totalProducts,
             sprintf(
-                'Cierre automático completado: %d maestros consolidados y %d aprobados para exportación segura.',
+                'Cierre automático completado: %d maestros consolidados, %d aprobados y %d retirados por no cumplir la exportación real.',
                 count($masterIds),
-                $approvedCount
+                $approvedCount,
+                $revokedCount
             ),
             $progressCallback
         );
@@ -126,8 +117,9 @@ class ImportPostProcessAutomationService
             'masters_in_import' => count($masterIds),
             'synced_ean_issues' => (int) $syncedIssues,
             'synced_category_suggestions' => (int) $syncedSuggestions,
-            'approval_candidates' => (int) $approvalCandidates,
+            'approval_candidates' => $approvalCandidates->count(),
             'approved_masters' => $approvedCount,
+            'revoked_masters' => $revokedCount,
         ];
     }
 

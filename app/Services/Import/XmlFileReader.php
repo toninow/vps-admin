@@ -3,15 +3,16 @@
 namespace App\Services\Import;
 
 use SimpleXMLElement;
+use XMLReader;
 
 class XmlFileReader implements FileReaderInterface
 {
     /**
-     * Rutas XPath para listas de filas (se prueba en orden).
+     * Nombres de nodo preferidos para detectar filas de catálogo.
      *
      * @var array<int, string>
      */
-    protected array $rowPaths = ['//row', '//item', '//product', '//producto', '//record', '//*[local-name()="row"]', '/*/*', '/*'];
+    protected array $preferredRowNames = ['row', 'item', 'product', 'producto', 'record'];
 
     public function getColumnNames(string $path): array
     {
@@ -24,50 +25,57 @@ class XmlFileReader implements FileReaderInterface
 
     public function readRows(string $path, ?int $limit = null): array
     {
-        $this->ensureFileExists($path);
-        $content = file_get_contents($path);
-        if ($content === false || trim($content) === '') {
-            return [];
-        }
-
-        libxml_use_internal_errors(true);
-        try {
-            $xml = new SimpleXMLElement($content);
-        } catch (\Throwable $e) {
-            libxml_clear_errors();
-            throw new \RuntimeException('XML no válido: ' . $e->getMessage());
-        }
-        libxml_clear_errors();
-
         $rows = [];
-        foreach ($this->rowPaths as $xpath) {
-            $nodes = @$xml->xpath($xpath);
-            if ($nodes === false || empty($nodes)) {
+        $this->streamRows($path, function (array $row) use (&$rows) {
+            $rows[] = $row;
+        }, $limit);
+
+        return $rows;
+    }
+
+    /**
+     * Recorre el XML en streaming y entrega cada fila al callback sin cargar el archivo entero en memoria.
+     *
+     * @param  callable(array<string, string>, int):void  $callback
+     */
+    public function streamRows(string $path, callable $callback, ?int $limit = null): int
+    {
+        $this->ensureFileExists($path);
+
+        $rowPattern = $this->detectRowPattern($path);
+        $reader = $this->openReader($path);
+        $count = 0;
+
+        while ($reader->read()) {
+            if ($reader->nodeType !== XMLReader::ELEMENT) {
                 continue;
             }
-            foreach ($nodes as $node) {
-                $flat = $this->flattenNode($node);
-                if ($flat === []) {
-                    continue;
-                }
-                $rows[] = $flat;
-                if ($limit !== null && count($rows) >= $limit) {
-                    break 2;
-                }
+
+            if (! $this->matchesRowPattern($reader, $rowPattern)) {
+                continue;
             }
-            if (! empty($rows)) {
+
+            $outerXml = $reader->readOuterXML();
+            if (! is_string($outerXml) || trim($outerXml) === '') {
+                continue;
+            }
+
+            $flat = $this->parseRowFragment($outerXml);
+            if ($flat === []) {
+                continue;
+            }
+
+            $count++;
+            $callback($flat, $count);
+
+            if ($limit !== null && $count >= $limit) {
                 break;
             }
         }
 
-        if (empty($rows)) {
-            $flat = $this->flattenNode($xml);
-            if ($flat !== []) {
-                $rows[] = $flat;
-            }
-        }
+        $reader->close();
 
-        return $rows;
+        return $count;
     }
 
     protected function ensureFileExists(string $path): void
@@ -75,6 +83,125 @@ class XmlFileReader implements FileReaderInterface
         if (! file_exists($path) || ! is_readable($path)) {
             throw new \RuntimeException("El archivo no existe o no se puede leer: " . basename($path));
         }
+    }
+
+    /**
+     * @return array{name:string, depth:int}
+     */
+    protected function detectRowPattern(string $path): array
+    {
+        $reader = $this->openReader($path);
+
+        $rootDepth = null;
+        $rootElement = null;
+        $shallowCounts = [];
+        $fallback = null;
+        $scanned = 0;
+
+        while ($reader->read()) {
+            if ($reader->nodeType !== XMLReader::ELEMENT) {
+                continue;
+            }
+
+            $scanned++;
+            $depth = $reader->depth;
+            $name = $reader->name;
+            $localName = strtolower($reader->localName ?: $name);
+
+            if ($rootDepth === null) {
+                $rootDepth = $depth;
+                $rootElement = $name;
+                continue;
+            }
+
+            if (in_array($localName, $this->preferredRowNames, true)) {
+                $reader->close();
+
+                return [
+                    'name' => $name,
+                    'depth' => $depth,
+                ];
+            }
+
+            if ($fallback === null && $depth === $rootDepth + 1 && $name !== $rootElement) {
+                $fallback = [
+                    'name' => $name,
+                    'depth' => $depth,
+                ];
+            }
+
+            if ($depth === $rootDepth + 1) {
+                $key = $depth . '|' . $name;
+                $shallowCounts[$key] = ($shallowCounts[$key] ?? 0) + 1;
+            }
+
+            if ($scanned >= 4000) {
+                break;
+            }
+        }
+
+        $reader->close();
+
+        if ($shallowCounts !== []) {
+            arsort($shallowCounts);
+            $bestKey = array_key_first($shallowCounts);
+            if (is_string($bestKey)) {
+                [$depth, $name] = explode('|', $bestKey, 2);
+
+                return [
+                    'name' => $name,
+                    'depth' => (int) $depth,
+                ];
+            }
+        }
+
+        return $fallback ?? [
+            'name' => $rootElement ?? 'row',
+            'depth' => ($rootDepth ?? 0) + 1,
+        ];
+    }
+
+    /**
+     * @param  array{name:string, depth:int}  $rowPattern
+     */
+    protected function matchesRowPattern(XMLReader $reader, array $rowPattern): bool
+    {
+        return $reader->depth === $rowPattern['depth']
+            && $reader->name === $rowPattern['name'];
+    }
+
+    protected function openReader(string $path): XMLReader
+    {
+        $reader = new XMLReader();
+        libxml_use_internal_errors(true);
+
+        if (! $reader->open($path, null, LIBXML_NONET | LIBXML_COMPACT | LIBXML_PARSEHUGE)) {
+            libxml_clear_errors();
+
+            throw new \RuntimeException('No se pudo abrir el archivo XML.');
+        }
+
+        return $reader;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function parseRowFragment(string $outerXml): array
+    {
+        libxml_use_internal_errors(true);
+
+        try {
+            $node = new SimpleXMLElement($outerXml);
+        } catch (\Throwable $e) {
+            libxml_clear_errors();
+
+            return [];
+        }
+
+        libxml_clear_errors();
+
+        return $this->flattenNode($node);
     }
 
     /**

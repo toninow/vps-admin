@@ -47,7 +47,8 @@ class DefaultCategorySuggestionApplierService
                         $normalizedProductIds !== null && $normalizedProductIds !== [],
                         fn ($query) => $query->whereIn('np.id', $normalizedProductIds)
                     )
-                    ->groupBy('pcs.normalized_product_id');
+                    ->groupBy('pcs.normalized_product_id')
+                    ->havingRaw('COUNT(*) = 1');
             });
 
         $applied = 0;

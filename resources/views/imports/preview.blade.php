@@ -4,6 +4,10 @@
 @section('page_title', 'Preview importación')
 
 @section('content')
+@php
+    $previewSupplierName = $import->supplier->name ?? 'Proveedor';
+    $previewFileName = $import->filename_original;
+@endphp
 <div class="space-y-4">
     @if (isset($mpsfpProject))
         @include('projects.mpsfp._nav', ['project' => $mpsfpProject, 'sections' => $mpsfpSections])
@@ -32,8 +36,8 @@
     <div class="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
         <p class="text-sm text-[#555555]"><strong>Archivo:</strong> {{ $import->filename_original }} — <strong>Proveedor:</strong> {{ $import->supplier->name ?? '—' }} — <strong>Tipo:</strong> {{ $import->file_type }} — <strong>Año catálogo:</strong> {{ $import->catalog_year ?? '—' }}</p>
         <div class="mt-3 flex flex-wrap gap-2">
-            <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.mapping', [$mpsfpProject, $import]) : route('imports.mapping', $import) }}" class="btn-primary">Continuar a mapeo</a>
-            <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.show', [$mpsfpProject, $import]) : route('imports.show', $import) }}" class="btn-secondary">Ver importación</a>
+            <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.mapping', [$mpsfpProject, $import]) : route('imports.mapping', $import) }}" class="btn-primary" data-import-activity-link data-activity-title="Abriendo mapeo" data-activity-stage="Leyendo archivo y preparando columnas..." data-activity-message="El sistema está preparando el mapeo del archivo para que puedas validar campos y sugerencias.">Continuar a mapeo</a>
+            <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.show', [$mpsfpProject, $import]) : route('imports.show', $import) }}" class="btn-secondary" data-import-activity-link data-activity-title="Abriendo ficha de importación" data-activity-stage="Cargando resumen del lote..." data-activity-message="La app está preparando el detalle completo de la importación.">Ver importación</a>
             <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.index', $mpsfpProject) : route('imports.index') }}" class="btn-link-muted">Listado</a>
         </div>
     </div>
@@ -78,4 +82,54 @@
         </table>
     </div>
 </div>
+
+@include('imports._activity_overlay')
 @endsection
+
+@push('scripts')
+    <script>
+        (() => {
+            const overlay = document.getElementById('import-activity-overlay');
+            const supplierName = @js($previewSupplierName);
+            const fileName = @js($previewFileName);
+            if (!overlay) {
+                return;
+            }
+
+            const titleEl = document.getElementById('import-activity-title');
+            const contextEl = document.getElementById('import-activity-context');
+            const subtitleEl = document.getElementById('import-activity-subtitle');
+            const stageEl = document.getElementById('import-activity-stage');
+            const percentEl = document.getElementById('import-activity-percent');
+            const barEl = document.getElementById('import-activity-bar');
+            const messageEl = document.getElementById('import-activity-message');
+            const fileEl = document.getElementById('import-activity-file');
+            const supplierEl = document.getElementById('import-activity-supplier');
+            const actionEl = document.getElementById('import-activity-action');
+            const noteEl = document.getElementById('import-activity-note');
+
+            const showOverlay = (link) => {
+                overlay.classList.remove('hidden');
+                overlay.classList.add('flex');
+                titleEl.textContent = link.dataset.activityTitle || 'Abriendo pantalla';
+                contextEl.textContent = `${supplierName} · ${fileName}`;
+                subtitleEl.textContent = 'El sistema está preparando la siguiente pantalla.';
+                stageEl.textContent = link.dataset.activityStage || 'Preparando vista...';
+                percentEl.textContent = '0.00';
+                barEl.style.width = '100%';
+                barEl.classList.add('mp-progress-indeterminate');
+                messageEl.textContent = link.dataset.activityMessage || 'La aplicación sigue trabajando.';
+                fileEl.textContent = fileName;
+                supplierEl.textContent = supplierName;
+                actionEl.textContent = 'Navegación interna';
+                noteEl.textContent = 'Esta capa evita que parezca que la app se quedó congelada mientras se prepara la siguiente pantalla.';
+            };
+
+            document.querySelectorAll('[data-import-activity-link]').forEach((link) => {
+                link.addEventListener('click', () => {
+                    showOverlay(link);
+                });
+            });
+        })();
+    </script>
+@endpush

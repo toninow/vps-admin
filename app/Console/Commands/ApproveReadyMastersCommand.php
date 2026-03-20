@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\MasterProduct;
+use App\Services\Export\MasterApprovalService;
 use Illuminate\Console\Command;
 
 class ApproveReadyMastersCommand extends Command
@@ -15,24 +15,21 @@ class ApproveReadyMastersCommand extends Command
 
     protected $description = 'Aprueba maestros que ya estan listos para exportacion: categoria, precio y sin incidencias EAN abiertas.';
 
-    public function handle(): int
+    public function handle(MasterApprovalService $masterApprovalService): int
     {
         $limit = max(0, (int) $this->option('limit'));
         $dryRun = (bool) $this->option('dry-run');
         $allowSuggested = (bool) $this->option('allow-suggested-category');
+        $supplierId = $this->option('supplier-id') !== null
+            ? (int) $this->option('supplier-id')
+            : null;
 
-        $query = MasterProduct::query()
-            ->where('is_approved', false)
-            ->whereNotNull('price_tax_incl')
-            ->whereNotNull('cost_price')
-            ->whereColumn('price_tax_incl', '>=', 'cost_price')
-            ->whereNotNull('category_id')
-            ->when(! $allowSuggested, fn ($builder) => $builder->where('category_status', 'confirmed'))
-            ->whereDoesntHave('normalizedProducts.productEanIssues', fn ($builder) => $builder->whereNull('resolved_at'))
-            ->when($this->option('supplier-id'), fn ($builder) => $builder->whereHas('normalizedProducts', fn ($inner) => $inner->where('supplier_id', (int) $this->option('supplier-id'))))
-            ->orderBy('id');
-
-        $candidateCount = (clone $query)->count();
+        $ids = $masterApprovalService->collectApprovableIds(
+            allowSuggestedCategory: $allowSuggested,
+            supplierId: $supplierId,
+            limit: $limit
+        );
+        $candidateCount = $ids->count();
 
         if ($candidateCount === 0) {
             $this->warn('No hay maestros que cumplan los criterios de aprobacion segura.');
@@ -45,21 +42,9 @@ class ApproveReadyMastersCommand extends Command
             return self::SUCCESS;
         }
 
-        if ($limit > 0) {
-            $query->limit($limit);
-        }
+        $approvedCount = $masterApprovalService->approve($ids);
 
-        $ids = $query->pluck('id');
-
-        MasterProduct::query()
-            ->whereIn('id', $ids)
-            ->update([
-                'is_approved' => true,
-                'approved_at' => now(),
-                'approved_by_id' => null,
-            ]);
-
-        $this->info('Maestros aprobados: ' . $ids->count());
+        $this->info('Maestros aprobados: ' . $approvedCount);
 
         return self::SUCCESS;
     }

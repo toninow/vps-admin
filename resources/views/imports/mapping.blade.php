@@ -7,6 +7,8 @@
 @php
     $mappingCompletion = count(array_filter($columnsMap ?? []));
     $mappingPercent = max(0, min(100, (int) round(($mappingCompletion / max(count($targetFields), 1)) * 100)));
+    $mappingSupplierName = $import->supplier->name ?? 'Proveedor';
+    $mappingFileName = $import->filename_original;
 @endphp
 
 <div class="space-y-6">
@@ -70,7 +72,7 @@
     </section>
 
     <div class="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <form action="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.mapping.store', [$mpsfpProject, $import]) : route('imports.mapping.store', $import) }}" method="POST" class="mpsfp-panel p-6">
+        <form action="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.mapping.store', [$mpsfpProject, $import]) : route('imports.mapping.store', $import) }}" method="POST" class="mpsfp-panel p-6" id="import-mapping-form">
             @csrf
 
             <div class="flex items-center justify-between gap-4">
@@ -127,9 +129,9 @@
             </div>
 
             <div class="mt-6 flex flex-wrap gap-2">
-                <button type="submit" name="post_mapping_action" value="save" class="btn-secondary">Guardar mapeo y filas</button>
-                <button type="submit" name="post_mapping_action" value="process" class="btn-primary">Guardar y procesar + normalizar</button>
-                <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.preview', [$mpsfpProject, $import]) : route('imports.preview', $import) }}" class="btn-secondary">Volver al preview</a>
+                <button type="submit" name="post_mapping_action" value="save" class="btn-secondary" data-mapping-submit-label="Guardando mapeo y filas">Guardar mapeo y filas</button>
+                <button type="submit" name="post_mapping_action" value="process" class="btn-primary" data-mapping-submit-label="Guardando y lanzando proceso completo">Guardar y procesar + normalizar</button>
+                <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.preview', [$mpsfpProject, $import]) : route('imports.preview', $import) }}" class="btn-secondary" data-import-activity-link data-activity-title="Volviendo al preview" data-activity-stage="Recargando muestra del archivo..." data-activity-message="La aplicación está preparando otra vez el preview para este lote.">Volver al preview</a>
                 <a href="{{ isset($mpsfpProject) ? route('projects.mpsfp.imports.show', [$mpsfpProject, $import]) : route('imports.show', $import) }}" class="btn-link-muted">Ver importación</a>
             </div>
         </form>
@@ -180,4 +182,138 @@
         </div>
     </div>
 </div>
+
+@include('imports._activity_overlay')
 @endsection
+
+@push('scripts')
+    <script>
+        (() => {
+            const overlay = document.getElementById('import-activity-overlay');
+            const form = document.getElementById('import-mapping-form');
+            const supplierName = @js($mappingSupplierName);
+            const fileName = @js($mappingFileName);
+
+            if (!overlay || !form) {
+                return;
+            }
+
+            const titleEl = document.getElementById('import-activity-title');
+            const contextEl = document.getElementById('import-activity-context');
+            const subtitleEl = document.getElementById('import-activity-subtitle');
+            const stageEl = document.getElementById('import-activity-stage');
+            const percentEl = document.getElementById('import-activity-percent');
+            const barEl = document.getElementById('import-activity-bar');
+            const messageEl = document.getElementById('import-activity-message');
+            const fileEl = document.getElementById('import-activity-file');
+            const supplierEl = document.getElementById('import-activity-supplier');
+            const actionEl = document.getElementById('import-activity-action');
+            const noteEl = document.getElementById('import-activity-note');
+            const errorEl = document.getElementById('import-activity-error');
+            const buttons = Array.from(form.querySelectorAll('button[type="submit"]'));
+
+            let submitAction = 'save';
+            let progressTimer = null;
+            let stageTimer = null;
+            let virtualPercent = 6;
+
+            const stageMessages = {
+                save: [
+                    'Validando columnas seleccionadas...',
+                    'Leyendo archivo del proveedor...',
+                    'Persistiendo filas del lote...',
+                    'Cerrando guardado y preparando respuesta...',
+                ],
+                process: [
+                    'Validando columnas seleccionadas...',
+                    'Leyendo archivo del proveedor...',
+                    'Persistiendo filas del lote...',
+                    'Preparando procesamiento y normalización...',
+                ],
+            };
+
+            const showOverlay = ({title, stage, message, action, indeterminate = false}) => {
+                overlay.classList.remove('hidden');
+                overlay.classList.add('flex');
+                titleEl.textContent = title;
+                contextEl.textContent = `${supplierName} · ${fileName}`;
+                subtitleEl.textContent = 'La aplicación sigue trabajando en segundo plano de la petición actual.';
+                stageEl.textContent = stage;
+                percentEl.textContent = virtualPercent.toFixed(2);
+                barEl.style.width = `${virtualPercent}%`;
+                barEl.classList.toggle('mp-progress-indeterminate', indeterminate);
+                messageEl.textContent = message;
+                fileEl.textContent = fileName;
+                supplierEl.textContent = supplierName;
+                actionEl.textContent = action;
+                noteEl.textContent = 'En XML o Excel grandes esta fase puede tardar mientras se leen filas y se guardan lotes en la base de datos.';
+                errorEl.classList.add('hidden');
+                errorEl.textContent = '';
+            };
+
+            buttons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    submitAction = button.value || 'save';
+                });
+            });
+
+            form.addEventListener('submit', () => {
+                buttons.forEach((button) => {
+                    button.disabled = true;
+                });
+
+                virtualPercent = 6;
+                const isProcess = submitAction === 'process';
+                const messages = stageMessages[submitAction] || stageMessages.save;
+                let stageIndex = 0;
+
+                showOverlay({
+                    title: isProcess ? 'Guardando y lanzando el proceso completo' : 'Guardando mapeo y filas del lote',
+                    stage: messages[0],
+                    message: isProcess
+                        ? 'Se están validando columnas, guardando filas y preparando el pipeline automático.'
+                        : 'Se están validando columnas y guardando las filas del archivo para la siguiente fase.',
+                    action: isProcess ? 'Mapeo + proceso completo' : 'Mapeo + persistencia',
+                    indeterminate: false,
+                });
+
+                if (progressTimer) {
+                    clearInterval(progressTimer);
+                }
+                if (stageTimer) {
+                    clearInterval(stageTimer);
+                }
+
+                progressTimer = window.setInterval(() => {
+                    virtualPercent = Math.min(92, virtualPercent + (virtualPercent < 45 ? 7 : (virtualPercent < 75 ? 4 : 1.5)));
+                    percentEl.textContent = virtualPercent.toFixed(2);
+                    barEl.style.width = `${virtualPercent}%`;
+                    if (virtualPercent >= 88) {
+                        barEl.classList.add('mp-progress-indeterminate');
+                    }
+                }, 700);
+
+                stageTimer = window.setInterval(() => {
+                    stageIndex = Math.min(messages.length - 1, stageIndex + 1);
+                    stageEl.textContent = messages[stageIndex];
+                    messageEl.textContent = isProcess
+                        ? 'El sistema sigue leyendo el archivo, guardando filas y preparando el lote completo.'
+                        : 'El sistema sigue leyendo el archivo y guardando las filas del lote.';
+                }, 1800);
+            });
+
+            document.querySelectorAll('[data-import-activity-link]').forEach((link) => {
+                link.addEventListener('click', () => {
+                    virtualPercent = 0;
+                    showOverlay({
+                        title: link.dataset.activityTitle || 'Abriendo pantalla',
+                        stage: link.dataset.activityStage || 'Preparando vista...',
+                        message: link.dataset.activityMessage || 'La aplicación sigue trabajando.',
+                        action: 'Navegación interna',
+                        indeterminate: true,
+                    });
+                });
+            });
+        })();
+    </script>
+@endpush

@@ -88,7 +88,22 @@ class MpsfpImportController extends Controller
 
         $ext = pathinfo($file->getClientOriginalName(), PATHINFO_EXTENSION) ?: $fileType;
         $dir = "supplier-imports/{$import->id}";
-        $path = $file->storeAs($dir, 'file.' . $ext, 'local');
+        Storage::disk('local')->deleteDirectory($dir);
+        Storage::disk('local')->makeDirectory($dir);
+
+        $path = Storage::disk('local')->putFileAs($dir, $file, 'file.' . $ext);
+
+        if (! is_string($path) || $path === '' || ! Storage::disk('local')->exists($path)) {
+            $import->delete();
+
+            return redirect()
+                ->back()
+                ->withInput($request->except('file'))
+                ->withErrors([
+                    'file' => 'No se pudo guardar el archivo en el servidor. Revisa permisos de escritura e intentalo de nuevo.',
+                ]);
+        }
+
         $import->update(['file_path' => $path]);
 
         $realPath = Storage::disk('local')->path($path);
@@ -209,8 +224,9 @@ class MpsfpImportController extends Controller
         }
 
         $sampleRows = [];
+        $sampleLimit = $import->file_type === FileTypeDetector::TYPE_XML ? 20 : 120;
         try {
-            $sampleRows = $reader->readRows($path, 200);
+            $sampleRows = $reader->readRows($path, $sampleLimit);
         } catch (\Throwable $e) {
         }
 
@@ -306,34 +322,50 @@ class MpsfpImportController extends Controller
 
         try {
             $reader = $this->readerFactory->getReaderForType($import->file_type);
-            $rows = $reader->readRows($path, null);
         } catch (\Throwable $e) {
             return redirect()->route('projects.mpsfp.imports.show', [$project, $import])->withErrors(['file' => 'Error al leer el archivo para guardar filas: ' . $e->getMessage()]);
         }
 
         try {
-            DB::transaction(function () use ($import, $rows) {
+            DB::transaction(function () use ($import, $reader, $path) {
                 SupplierImportRow::where('supplier_import_id', $import->id)->delete();
-                $import->update(['total_rows' => count($rows)]);
 
                 $batch = [];
-                foreach ($rows as $i => $raw) {
+                $totalRows = 0;
+
+                $persistRow = function (array $raw, int $rowIndex) use (&$batch, $import) {
                     $batch[] = [
                         'supplier_import_id' => $import->id,
-                        'row_index' => $i + 1,
+                        'row_index' => $rowIndex,
                         'raw_data' => json_encode($raw),
                         'status' => SupplierImportRow::STATUS_PENDING,
                         'created_at' => now(),
                         'updated_at' => now(),
                     ];
+
                     if (count($batch) >= 500) {
                         SupplierImportRow::insert($batch);
                         $batch = [];
                     }
+                };
+
+                if ($reader instanceof \App\Services\Import\XmlFileReader) {
+                    $totalRows = $reader->streamRows($path, function (array $raw, int $rowIndex) use ($persistRow) {
+                        $persistRow($raw, $rowIndex);
+                    });
+                } else {
+                    $rows = $reader->readRows($path, null);
+                    foreach ($rows as $i => $raw) {
+                        $persistRow($raw, $i + 1);
+                    }
+                    $totalRows = count($rows);
                 }
+
                 if (! empty($batch)) {
                     SupplierImportRow::insert($batch);
                 }
+
+                $import->update(['total_rows' => $totalRows]);
             });
         } catch (\Throwable $e) {
             return redirect()->route('projects.mpsfp.imports.show', [$project, $import])->withErrors(['db' => 'Error al guardar las filas: ' . $e->getMessage()]);
@@ -353,7 +385,7 @@ class MpsfpImportController extends Controller
                 ->with('status', 'Mapeo guardado, filas persistidas y procesamiento completo encolado. El lote importará, normalizará, consolidará maestros, revisará EAN, preparará categorías y aprobará automáticamente lo seguro.');
         }
 
-        return redirect()->route('projects.mpsfp.imports.show', [$project, $import])->with('status', 'Mapeo guardado y ' . count($rows) . ' filas persistidas. Puede procesar la importación.');
+        return redirect()->route('projects.mpsfp.imports.show', [$project, $import])->with('status', 'Mapeo guardado y ' . number_format((int) $import->fresh()->total_rows, 0, ',', '.') . ' filas persistidas. Puede procesar la importación.');
     }
 
     public function process(Project $project, Request $request, SupplierImport $import): RedirectResponse|JsonResponse
