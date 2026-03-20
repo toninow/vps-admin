@@ -82,6 +82,20 @@ class AdagioSupplierProfile extends GenericSupplierProfile
             }
         }
 
+        $categoryColumns = [];
+        foreach ([1, 2, 3] as $level) {
+            foreach (["categoria {$level}", "categoria_{$level}"] as $candidate) {
+                if (isset($normalized[$candidate])) {
+                    $categoryColumns[] = $normalized[$candidate];
+                    break;
+                }
+            }
+        }
+
+        if ($categoryColumns !== []) {
+            $mapping['category_path_export'] = implode(' | ', array_values(array_unique($categoryColumns)));
+        }
+
         return $mapping;
     }
 

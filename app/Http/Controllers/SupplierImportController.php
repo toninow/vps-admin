@@ -238,9 +238,28 @@ class SupplierImportController extends Controller
         return view('imports.mapping', compact('import', 'columns', 'targetFields', 'columnsMap', 'previewRows'));
     }
 
-    public function saveMapping(Request $request, SupplierImport $import)
+    public function saveMapping(
+        Request $request,
+        SupplierImport $import,
+        ImportPipelineResetService $resetService
+    )
     {
         $this->authorize('update', $import);
+        $import->refresh();
+
+        if ($import->pipeline_is_running) {
+            return redirect()
+                ->route('imports.show', $import)
+                ->withErrors(['pipeline' => 'La importación tiene un proceso en marcha. Espera a que termine o cancélalo antes de volver a guardar el mapeo.']);
+        }
+
+        $replacedExistingBatch = false;
+        if ($this->importHasGeneratedCatalog($import)) {
+            $resetService->resetToMappingState($import);
+            $import->refresh();
+            $replacedExistingBatch = true;
+        }
+
         $postMappingAction = (string) $request->input('post_mapping_action', 'save');
         $launchFullPipeline = $postMappingAction === 'process';
 
@@ -357,7 +376,12 @@ class SupplierImportController extends Controller
                 ->with('status', 'Mapeo guardado, filas persistidas y procesamiento completo encolado. El lote importará, normalizará, consolidará maestros, revisará EAN, preparará categorías y aprobará automáticamente lo seguro.');
         }
 
-        return redirect()->route('imports.show', $import)->with('status', 'Mapeo guardado y ' . number_format((int) $import->fresh()->total_rows, 0, ',', '.') . ' filas persistidas. Puede procesar la importación.');
+        $status = 'Mapeo guardado y ' . number_format((int) $import->fresh()->total_rows, 0, ',', '.') . ' filas persistidas. Puede procesar la importación.';
+        if ($replacedExistingBatch) {
+            $status = 'Mapeo guardado, lote anterior reemplazado y ' . number_format((int) $import->fresh()->total_rows, 0, ',', '.') . ' filas persistidas. Puede procesar la importación.';
+        }
+
+        return redirect()->route('imports.show', $import)->with('status', $status);
     }
 
     public function process(Request $request, SupplierImport $import)
@@ -448,6 +472,7 @@ class SupplierImportController extends Controller
         return response()->json([
             'id' => $import->id,
             'status' => $import->status,
+            'updated_at' => $import->updated_at?->toIso8601String(),
             'pipeline_status' => $import->pipeline_status,
             'pipeline_stage' => $import->pipeline_stage,
             'pipeline_total' => $import->pipeline_total,
@@ -502,6 +527,15 @@ class SupplierImportController extends Controller
     private function pipelinePidFile(SupplierImport $import): string
     {
         return storage_path("logs/import-pipeline-{$import->id}.pid");
+    }
+
+    private function importHasGeneratedCatalog(SupplierImport $import): bool
+    {
+        return $import->normalizedProducts()->exists()
+            || $import->normalizationRuns()->exists()
+            || (int) $import->processed_rows > 0
+            || (int) $import->error_rows > 0
+            || in_array((string) $import->status, ['processed', 'processing', 'failed'], true);
     }
 
     private function queueProcessPipeline(SupplierImport $import): void

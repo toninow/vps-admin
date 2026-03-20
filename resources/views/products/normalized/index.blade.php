@@ -39,6 +39,7 @@
         request('master_link') === 'without_master' ? 'Sin maestro' : null,
         request('per_page') ? 'Por página: ' . ($selectedPerPage === 'all' ? 'Todos' : request('per_page')) : null,
     ]);
+    $activeImport = $activeImport ?? null;
 @endphp
 
 <div class="space-y-8">
@@ -115,6 +116,13 @@
 
     <section class="mpsfp-panel overflow-hidden">
         <div class="border-b border-zinc-50 bg-zinc-50/30 p-6">
+            @if ($activeImport && $activeImport->pipeline_is_running)
+                <div class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <strong>Este lote sigue normalizando.</strong>
+                    Los productos que ves de la importación #{{ $activeImport->id }} todavía pueden cambiar en descripción, etiquetas y ruta de categoría hasta que el proceso termine.
+                </div>
+            @endif
+
             <div class="compact-toolbar">
                 <div>
                     <h2 class="font-headline text-lg font-bold">Filtros y búsqueda</h2>
@@ -322,7 +330,12 @@
                                 ? number_format((float) $product->cost_price, 2, ',', '.') . ' €'
                                 : '';
                             $descriptionText = trim((string) ($product->description ?? ''));
-                            $descriptionPreview = \Illuminate\Support\Str::limit($descriptionText, 220);
+                            $descriptionPreviewLines = collect(preg_split('/\r\n|\r|\n/u', $descriptionText) ?: [])
+                                ->map(fn ($line) => trim((string) $line))
+                                ->filter()
+                                ->take(4)
+                                ->implode("\n");
+                            $descriptionPreview = \Illuminate\Support\Str::limit($descriptionPreviewLines !== '' ? $descriptionPreviewLines : $descriptionText, 220);
                             $summaryPreview = \Illuminate\Support\Str::limit($displaySummary, 180);
                             $masterReference = trim((string) ($product->masterProduct->reference ?? ''));
                             $tagsText = collect(preg_split('/\s*,\s*/u', (string) ($product->tags ?? '')) ?: [])

@@ -401,8 +401,19 @@
             </div>
 
             <div id="import-progress-modal-finished" class="hidden rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                <strong>Proceso finalizado.</strong>
+                <strong id="import-progress-modal-finished-title">Proceso finalizado correctamente.</strong>
                 <span id="import-progress-modal-finished-text">La vista se actualizará automáticamente en unos segundos.</span>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p id="import-progress-modal-live-status" class="font-medium text-slate-700">Seguimiento en vivo conectado.</p>
+                    <span id="import-progress-modal-live-heartbeat" class="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-600">Esperando primer pulso...</span>
+                </div>
+                <div class="mt-2 flex flex-col gap-1 text-xs text-slate-500 sm:flex-row sm:flex-wrap sm:gap-4">
+                    <span id="import-progress-modal-live-poll">Última comprobación: ahora mismo</span>
+                    <span id="import-progress-modal-live-elapsed">Tiempo en cola: 0 s</span>
+                </div>
             </div>
         </div>
 
@@ -451,7 +462,12 @@
             const modalErrorWrapEl = document.getElementById('import-progress-modal-error-wrap');
             const modalErrorEl = document.getElementById('import-progress-modal-error');
             const modalFinishedEl = document.getElementById('import-progress-modal-finished');
+            const modalFinishedTitleEl = document.getElementById('import-progress-modal-finished-title');
             const modalFinishedTextEl = document.getElementById('import-progress-modal-finished-text');
+            const modalLiveStatusEl = document.getElementById('import-progress-modal-live-status');
+            const modalLiveHeartbeatEl = document.getElementById('import-progress-modal-live-heartbeat');
+            const modalLivePollEl = document.getElementById('import-progress-modal-live-poll');
+            const modalLiveElapsedEl = document.getElementById('import-progress-modal-live-elapsed');
             const modalCloseButtons = document.querySelectorAll('[data-import-progress-close], #import-progress-modal-close');
             const launchForms = document.querySelectorAll('[data-pipeline-launch]');
             const normalizationCard = document.getElementById('normalization-run-card');
@@ -465,6 +481,9 @@
             let modalMode = 'process';
             let isSubmitting = false;
             let isCancelling = false;
+            let lastPollAt = Date.now();
+            let lastServerPulseAt = null;
+            let queueObservedAt = null;
             const importContextLabel = @json(($import->supplier->name ?? 'Proveedor') . ' · ' . $import->filename_original);
 
             const statusClasses = {
@@ -495,6 +514,17 @@
                 normalize: 'Reprocesando y cerrando importación',
             };
 
+            const completionCopyByMode = {
+                process: {
+                    title: 'Carga finalizada correctamente.',
+                    body: 'La importación, la normalización y el cierre automático han terminado correctamente.',
+                },
+                normalize: {
+                    title: 'Reprocesado finalizado correctamente.',
+                    body: 'La normalización avanzada y el cierre automático han terminado correctamente.',
+                },
+            };
+
             const buttonLabelByKind = {
                 process: { idle: 'Procesar y normalizar', busy: 'Proceso en marcha...' },
                 normalize: { idle: 'Reprocesar y cerrar automático', busy: 'Proceso en marcha...' },
@@ -503,6 +533,95 @@
             const setBadgeClass = (element, status) => {
                 if (!element) return;
                 element.className = `status-badge ${statusClasses[status] || statusClasses.idle}`;
+            };
+
+            const formatDuration = (seconds) => {
+                const total = Math.max(0, Math.floor(seconds));
+                const mins = Math.floor(total / 60);
+                const secs = total % 60;
+
+                if (mins <= 0) {
+                    return `${secs} s`;
+                }
+
+                return `${mins} min ${secs.toString().padStart(2, '0')} s`;
+            };
+
+            const updateLiveMeta = () => {
+                const now = Date.now();
+                const secondsSincePoll = Math.max(0, Math.floor((now - lastPollAt) / 1000));
+                const secondsSincePulse = lastServerPulseAt ? Math.max(0, Math.floor((now - lastServerPulseAt) / 1000)) : null;
+                const queueSeconds = queueObservedAt ? Math.max(0, Math.floor((now - queueObservedAt) / 1000)) : 0;
+
+                if (modalLivePollEl) {
+                    modalLivePollEl.textContent = `Última comprobación: hace ${formatDuration(secondsSincePoll)}`;
+                }
+
+                if (modalLiveElapsedEl) {
+                    modalLiveElapsedEl.textContent = importPipelineStatus === 'queued'
+                        ? `Tiempo en cola: ${formatDuration(queueSeconds)}`
+                        : 'Tiempo en cola: no aplica';
+                }
+
+                if (!modalLiveHeartbeatEl || !modalLiveStatusEl) {
+                    return;
+                }
+
+                if (secondsSincePulse === null) {
+                    modalLiveHeartbeatEl.textContent = 'Esperando primer pulso...';
+                    modalLiveHeartbeatEl.className = 'text-xs font-semibold uppercase tracking-[0.14em] text-amber-600';
+                    modalLiveStatusEl.textContent = 'Seguimiento en vivo conectado.';
+                    return;
+                }
+
+                if (importPipelineStatus === 'completed') {
+                    modalLiveHeartbeatEl.textContent = 'Proceso cerrado correctamente';
+                    modalLiveHeartbeatEl.className = 'text-xs font-semibold uppercase tracking-[0.14em] text-emerald-600';
+                    modalLiveStatusEl.textContent = 'El servidor confirmó la finalización del proceso.';
+                    return;
+                }
+
+                if (importPipelineStatus === 'failed') {
+                    modalLiveHeartbeatEl.textContent = 'Proceso detenido';
+                    modalLiveHeartbeatEl.className = 'text-xs font-semibold uppercase tracking-[0.14em] text-red-600';
+                    modalLiveStatusEl.textContent = 'El servidor informó un fallo durante la ejecución.';
+                    return;
+                }
+
+                if (secondsSincePulse >= 12) {
+                    modalLiveHeartbeatEl.textContent = `Sin pulso nuevo desde hace ${formatDuration(secondsSincePulse)}`;
+                    modalLiveHeartbeatEl.className = 'text-xs font-semibold uppercase tracking-[0.14em] text-amber-600';
+                    modalLiveStatusEl.textContent = 'Seguimos consultando, pero el servidor no ha publicado un avance nuevo todavía.';
+                    return;
+                }
+
+                modalLiveHeartbeatEl.textContent = `Pulso del servidor hace ${formatDuration(secondsSincePulse)}`;
+                modalLiveHeartbeatEl.className = 'text-xs font-semibold uppercase tracking-[0.14em] text-emerald-600';
+                modalLiveStatusEl.textContent = importPipelineStatus === 'queued'
+                    ? 'El lote sigue vivo y esperando turno de ejecución.'
+                    : 'El lote está respondiendo y publicando progreso.';
+            };
+
+            const setProgressBarState = (element, status, percent) => {
+                if (!element) return;
+
+                element.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+                element.classList.remove('bg-[#E6007E]', 'bg-emerald-500', 'bg-red-500', 'animate-pulse');
+
+                if (status === 'completed') {
+                    element.classList.add('bg-emerald-500');
+                    return;
+                }
+
+                if (status === 'failed') {
+                    element.classList.add('bg-red-500');
+                    return;
+                }
+
+                element.classList.add('bg-[#E6007E]');
+                if (status === 'queued' && percent === 0) {
+                    element.classList.add('animate-pulse');
+                }
             };
 
             const openModal = () => {
@@ -530,6 +649,14 @@
             };
 
             const setModalState = (data) => {
+                lastPollAt = Date.now();
+                if (data.updated_at) {
+                    const parsedPulse = Date.parse(data.updated_at);
+                    if (!Number.isNaN(parsedPulse)) {
+                        lastServerPulseAt = parsedPulse;
+                    }
+                }
+
                 const latestRun = data.latest_run || null;
                 const status = data.pipeline_status || importPipelineStatus || 'idle';
                 const stage = data.pipeline_stage || 'idle';
@@ -543,7 +670,18 @@
 
                 importPipelineStatus = status;
 
-                const stageText = status === 'queued'
+                if (status === 'queued') {
+                    queueObservedAt = queueObservedAt || Date.now();
+                } else if (status !== 'queued') {
+                    queueObservedAt = null;
+                }
+
+                const isCompleted = status === 'completed';
+                const isFailed = status === 'failed';
+
+                const stageText = isCompleted
+                    ? 'Proceso finalizado correctamente'
+                    : status === 'queued'
                     ? 'Esperando turno en la cola de lotes'
                     : (stageLabels[stage] || stage);
                 const messageText = data.pipeline_message || 'El sistema está preparando la ejecución en segundo plano.';
@@ -554,8 +692,7 @@
                 importMessageEl.textContent = messageText;
                 importStageEl.textContent = stageText;
                 importPercentEl.textContent = percentText;
-                importBarEl.style.width = `${Math.min(100, Math.max(0, visiblePercent))}%`;
-                importBarEl.classList.toggle('animate-pulse', status === 'queued' && visiblePercent === 0);
+                setProgressBarState(importBarEl, status, visiblePercent);
                 importProcessedEl.textContent = visibleProcessed;
                 importTotalEl.textContent = visibleTotal;
                 importNormalizedEl.textContent = data.normalized_products_count ?? 0;
@@ -571,8 +708,7 @@
                 modalStatusEl.textContent = statusLabels[status] || status;
                 modalStageEl.textContent = stageText;
                 modalPercentEl.textContent = percentText;
-                modalBarEl.style.width = `${Math.min(100, Math.max(0, visiblePercent))}%`;
-                modalBarEl.classList.toggle('animate-pulse', status === 'queued' && visiblePercent === 0);
+                setProgressBarState(modalBarEl, status, visiblePercent);
                 modalMessageEl.textContent = messageText;
                 modalProcessedEl.textContent = visibleProcessed;
                 modalTotalEl.textContent = visibleTotal;
@@ -581,14 +717,27 @@
                 modalErrorWrapEl.classList.toggle('hidden', !hasError);
                 modalErrorEl.textContent = hasError ? data.error_message : '';
                 modalFinishedEl.classList.toggle('hidden', status !== 'completed');
-                if (status === 'completed' && modalFinishedTextEl) {
-                    modalFinishedTextEl.textContent = `${importContextLabel} ha terminado correctamente. ${visibleProcessed} de ${visibleTotal} productos completados.`;
+                if (status === 'completed') {
+                    const completionCopy = completionCopyByMode[modalMode] || completionCopyByMode.process;
+                    if (modalFinishedTitleEl) {
+                        modalFinishedTitleEl.textContent = completionCopy.title;
+                    }
+                    if (modalFinishedTextEl) {
+                        const completionDetails = visibleTotal > 0
+                            ? `${visibleProcessed} de ${visibleTotal} registros completados.`
+                            : 'La vista se actualizará automáticamente en unos segundos.';
+                        modalFinishedTextEl.textContent = `${importContextLabel}: ${completionCopy.body} ${completionDetails}`;
+                    }
+                } else if (modalFinishedTitleEl) {
+                    modalFinishedTitleEl.textContent = 'Proceso finalizado correctamente.';
                 }
                 if (modalCancelButton) {
                     modalCancelButton.classList.toggle('hidden', !isActive);
-                    modalCancelButton.disabled = !isActive || isCancelling;
+                    modalCancelButton.disabled = !isActive || isCancelling || isFailed;
                     modalCancelButton.textContent = isCancelling ? 'Cancelando...' : 'Cancelar proceso';
                 }
+
+                updateLiveMeta();
 
                 setLaunchButtonsDisabled(isActive);
 
@@ -675,6 +824,8 @@
                 stopPolling();
                 pollImportStatus();
             };
+
+            window.setInterval(updateLiveMeta, 1000);
 
             const showLaunchingState = (kind) => {
                 modalMode = kind;
@@ -800,6 +951,9 @@
                         });
                         if (modalFinishedTextEl) {
                             modalFinishedTextEl.textContent = data.message || 'Proceso cancelado y lote limpiado.';
+                        }
+                        if (modalFinishedTitleEl) {
+                            modalFinishedTitleEl.textContent = 'Proceso cancelado correctamente.';
                         }
                         scheduleReload();
                     } catch (error) {

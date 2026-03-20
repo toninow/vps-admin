@@ -27,6 +27,20 @@ class ProductCatalogFormattingTest extends TestCase
         $this->assertSame("Características:\n• Tapa maciza\n• Fondo de arce\n• Estuche incluido", $formatted);
     }
 
+    public function test_it_formats_long_adagio_descriptions_as_useful_bullets(): void
+    {
+        $formatter = new ProductTextFormatterService();
+
+        $formatted = $formatter->formatCharacteristics(
+            "'Unidad exdemo. Diseño moderno Casiotone. Características: 61 sonidos seleccionados, generador de tono AiX, teclado de 61 teclas, función Surround. Elementos incluidos: adaptador de corriente, atril, manual.'"
+        );
+
+        $this->assertSame(
+            "Características:\n• Unidad exdemo. Diseño moderno Casiotone.\n• 61 sonidos seleccionados\n• generador de tono AiX\n• teclado de 61 teclas\n• función Surround.\n• Elementos incluidos: adaptador de corriente, atril, manual.",
+            $formatted
+        );
+    }
+
     public function test_it_builds_product_names_without_artificial_hyphens(): void
     {
         $formatter = new ProductTextFormatterService();

@@ -63,7 +63,8 @@ class ImportTransformerService
         // si `brand` viene vacío tras el mapping, asignar literal 'YAMAHA'.
         // (No afecta a otros proveedores.)
         $import->loadMissing('supplier');
-        $yamahaSlug = $import->supplier?->slug === 'yamaha';
+        $supplierSlug = $import->supplier?->slug;
+        $yamahaSlug = $supplierSlug === 'yamaha';
 
         $columnsMap = $snapshot['columns_map'];
         $supplierId = $import->supplier_id;
@@ -89,6 +90,7 @@ class ImportTransformerService
             &$skipped,
             &$handled,
             &$messages,
+            $supplierSlug,
             $yamahaSlug,
             $supplierId,
             $import,
@@ -111,9 +113,10 @@ class ImportTransformerService
 
                 $normalized = $this->applyMapping($raw, $columnsMap);
                 $normalized = $this->applyNameFallbacks($normalized);
+                $normalized = $this->fillDerivedImportFields($normalized, $raw, $columnsMap, $supplierSlug);
                 $normalized = $this->sanitizeTextFields($normalized);
                 $normalized = $this->sanitizeCategoryPath($normalized);
-                $normalized = $this->applyPresentationDefaults($normalized, $raw, $import->supplier?->slug);
+                $normalized = $this->applyPresentationDefaults($normalized, $raw, $supplierSlug);
 
                 if ($this->isNonProductRow($normalized, $raw)) {
                     $row->update([
@@ -321,6 +324,26 @@ class ImportTransformerService
     }
 
     /**
+     * Reconstruye campos compuestos del proveedor antes de la limpieza final.
+     *
+     * @param  array<string, mixed>  $normalized
+     * @param  array<string, mixed>  $raw
+     * @param  array<string, string>  $columnsMap
+     * @return array<string, mixed>
+     */
+    protected function fillDerivedImportFields(array $normalized, array $raw, array $columnsMap, ?string $supplierSlug = null): array
+    {
+        $normalized['category_path_export'] = $this->resolveCategoryPathExport(
+            $normalized['category_path_export'] ?? '',
+            $raw,
+            $columnsMap,
+            $supplierSlug
+        );
+
+        return $normalized;
+    }
+
+    /**
      * Evita usar nombres de producto como si fueran rutas de categoría y normaliza separadores a coma simple.
      *
      * @param  array<string, mixed>  $normalized
@@ -335,6 +358,105 @@ class ImportTransformerService
         ) ?? '';
 
         return $normalized;
+    }
+
+    protected function resolveCategoryPathExport(
+        mixed $mappedValue,
+        array $raw,
+        array $columnsMap,
+        ?string $supplierSlug = null
+    ): string {
+        $segments = [];
+
+        foreach ($this->resolveCategoryPathSourceKeys($raw, $columnsMap, $supplierSlug) as $sourceKey) {
+            $rawValue = $raw[$sourceKey] ?? null;
+            if (! is_scalar($rawValue)) {
+                continue;
+            }
+
+            $segments = array_merge(
+                $segments,
+                CategoryPathFormatter::split(trim((string) $rawValue))
+            );
+        }
+
+        if ($segments === []) {
+            $segments = CategoryPathFormatter::split((string) $mappedValue);
+        }
+
+        $candidate = implode(', ', $segments);
+
+        return CategoryPathFormatter::normalizeForStorage($candidate) ?? '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @param  array<string, string>  $columnsMap
+     * @return array<int, string>
+     */
+    protected function resolveCategoryPathSourceKeys(array $raw, array $columnsMap, ?string $supplierSlug = null): array
+    {
+        $keys = [];
+        $mappedSource = trim((string) ($columnsMap['category_path_export'] ?? ''));
+
+        if ($mappedSource !== '') {
+            foreach (preg_split('/\s*\|\s*/u', $mappedSource) ?: [] as $part) {
+                $part = trim((string) $part);
+                if ($part !== '' && array_key_exists($part, $raw)) {
+                    $keys[] = $part;
+                }
+            }
+        }
+
+        $numberedCategoryColumns = $this->numberedCategoryColumns($raw);
+        if ($supplierSlug === 'adagio' || count($numberedCategoryColumns) >= 2) {
+            $keys = array_merge($keys, $numberedCategoryColumns);
+        }
+
+        return array_values(array_unique($keys));
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return array<int, string>
+     */
+    protected function numberedCategoryColumns(array $raw): array
+    {
+        $columns = [];
+
+        foreach (array_keys($raw) as $key) {
+            $normalized = $this->normalizeSourceKeyName((string) $key);
+            if (! preg_match('/^categoria\s+(\d+)$/u', $normalized, $matches)) {
+                continue;
+            }
+
+            $columns[(int) $matches[1]] = (string) $key;
+        }
+
+        if ($columns === []) {
+            return [];
+        }
+
+        ksort($columns);
+
+        return array_values($columns);
+    }
+
+    protected function normalizeSourceKeyName(string $value): string
+    {
+        $value = mb_strtolower(trim($value), 'UTF-8');
+        $value = strtr($value, [
+            'á' => 'a', 'à' => 'a', 'ä' => 'a', 'â' => 'a', 'ã' => 'a',
+            'é' => 'e', 'è' => 'e', 'ë' => 'e', 'ê' => 'e',
+            'í' => 'i', 'ì' => 'i', 'ï' => 'i', 'î' => 'i',
+            'ó' => 'o', 'ò' => 'o', 'ö' => 'o', 'ô' => 'o', 'õ' => 'o',
+            'ú' => 'u', 'ù' => 'u', 'ü' => 'u', 'û' => 'u',
+            'ñ' => 'n', 'ç' => 'c',
+        ]);
+        $value = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $value) ?? $value;
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+
+        return trim($value);
     }
 
     /**

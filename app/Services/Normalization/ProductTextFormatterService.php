@@ -138,6 +138,7 @@ class ProductTextFormatterService
         $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+/u', ' ', $value) ?? $value;
         $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
         $value = trim($value);
+        $value = $this->stripWrappingQuotes($value);
 
         if ($maxLength !== null && mb_strlen($value) > $maxLength) {
             $value = rtrim(mb_substr($value, 0, $maxLength));
@@ -207,7 +208,8 @@ class ProductTextFormatterService
     {
         $description = $this->cleanInlineText($description, 4000);
         $fallbackName = $this->cleanInlineText($fallbackName, 1000);
-        $description = preg_replace('/^caracter[ií]sticas:\s*/iu', '', $description) ?? $description;
+        $description = preg_replace('/\bcaracter[ií]sticas:\s*/iu', "\n", $description) ?? $description;
+        $description = preg_replace('/\b(elementos incluidos|incluye|contenido del paquete|contenido del pack|dimensiones)\s*:\s*/iu', "\n$1: ", $description) ?? $description;
         $description = trim((string) $description);
 
         if ($description === '') {
@@ -219,6 +221,9 @@ class ProductTextFormatterService
         }
 
         $items = collect(preg_split('/\s*(?:•|;|\r\n|\r|\n)+\s*/u', $description) ?: [])
+            ->flatMap(function ($item) {
+                return $this->explodeCharacteristicItem((string) $item);
+            })
             ->map(fn ($item) => $this->cleanInlineText((string) $item, 1000))
             ->filter()
             ->values();
@@ -237,6 +242,56 @@ class ProductTextFormatterService
         return "Características:\n" . $items
             ->map(fn (string $item) => '• ' . $item)
             ->implode("\n");
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function explodeCharacteristicItem(string $item): array
+    {
+        $item = $this->cleanInlineText($item, 1500);
+        if ($item === '') {
+            return [];
+        }
+
+        if (preg_match('/^(elementos incluidos|incluye|contenido del paquete|contenido del pack|dimensiones)\s*:\s*(.+)$/iu', $item, $matches)) {
+            $label = ucfirst(mb_strtolower($matches[1], 'UTF-8'));
+            $payload = $this->cleanInlineText($matches[2], 1200);
+
+            return $payload !== '' ? ["{$label}: {$payload}"] : [$label];
+        }
+
+        $commaSeparated = preg_split('/\s*,\s*/u', $item) ?: [];
+        $commaSeparated = array_values(array_filter(array_map(
+            fn ($part) => $this->cleanInlineText((string) $part, 300),
+            $commaSeparated
+        )));
+
+        if (count($commaSeparated) >= 4) {
+            return $commaSeparated;
+        }
+
+        return [$item];
+    }
+
+    protected function stripWrappingQuotes(string $value): string
+    {
+        $trimmed = trim($value);
+
+        while ($trimmed !== '' && preg_match('/^(["\']{1,3})(.*)(["\']{1,3})$/us', $trimmed, $matches)) {
+            if ($matches[1][0] !== $matches[3][strlen($matches[3]) - 1]) {
+                break;
+            }
+
+            $inner = trim((string) $matches[2]);
+            if ($inner === '' || $inner === $trimmed) {
+                break;
+            }
+
+            $trimmed = $inner;
+        }
+
+        return trim($trimmed, " \t\n\r\0\x0B'\"");
     }
 
     protected function extractModelCandidate(

@@ -9,6 +9,7 @@ use App\Models\NormalizedProduct;
 use App\Models\ProductCategorySuggestion;
 use App\Models\Project;
 use App\Models\Supplier;
+use App\Models\SupplierImport;
 use App\Services\Categories\CategoryPathBuilderService;
 use App\Services\Export\MasterApprovalService;
 use App\Services\Export\PrestashopProductCsvService;
@@ -77,10 +78,16 @@ class MpsfpCatalogController extends Controller
 
         $perPage = $this->resolvePerPage($request, $query, 50);
         $products = $query->paginate($perPage)->withQueryString();
+        $activeImport = null;
+
+        if ($request->filled('supplier_import_id')) {
+            $activeImport = SupplierImport::with('supplier')->find($request->integer('supplier_import_id'));
+        }
 
         return view('products.normalized.index', [
             'products' => $products,
             'suppliers' => $suppliers,
+            'activeImport' => $activeImport,
             'normalizedStats' => $normalizedStats,
             'pageSizeOptions' => self::PAGE_SIZE_OPTIONS,
             'mpsfpProject' => $project,

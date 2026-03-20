@@ -18,7 +18,8 @@ class ImportFromFileService
     public function __construct(
         protected FileTypeDetector $detector,
         protected FileReaderFactory $readerFactory,
-        protected SupplierProfileResolver $profileResolver
+        protected SupplierProfileResolver $profileResolver,
+        protected ImportPipelineResetService $resetService
     ) {}
 
     /**
@@ -82,6 +83,11 @@ class ImportFromFileService
      */
     public function persistMappingAndRows(SupplierImport $import, array $columnsMap, string $filePath, ?int $savedByUserId = null): void
     {
+        if ($this->importHasGeneratedCatalog($import)) {
+            $this->resetService->resetToMappingState($import);
+            $import->refresh();
+        }
+
         $import->update([
             'status' => 'mapping',
             'mapping_snapshot' => [
@@ -118,5 +124,14 @@ class ImportFromFileService
                 SupplierImportRow::insert($batch);
             }
         });
+    }
+
+    private function importHasGeneratedCatalog(SupplierImport $import): bool
+    {
+        return $import->normalizedProducts()->exists()
+            || $import->normalizationRuns()->exists()
+            || (int) $import->processed_rows > 0
+            || (int) $import->error_rows > 0
+            || in_array((string) $import->status, ['processed', 'processing', 'failed'], true);
     }
 }
