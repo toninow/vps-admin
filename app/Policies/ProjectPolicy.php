@@ -9,7 +9,7 @@ class ProjectPolicy
 {
     public function viewAny(User $user): bool
     {
-        return $user->can('projects.view') || $user->projects()->exists();
+        return $user->can('projects.view') || $user->projects()->exists() || $user->canAccessMpsfp();
     }
 
     public function view(User $user, Project $project): bool
@@ -17,6 +17,11 @@ class ProjectPolicy
         if ($user->can('projects.view')) {
             return true;
         }
+
+        if ($project->slug === 'mpsfp' && $user->canAccessMpsfp()) {
+            return true;
+        }
+
         return $project->users()->where('users.id', $user->id)->exists();
     }
 

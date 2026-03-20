@@ -5,11 +5,11 @@
 
 @section('content')
 <div class="space-y-4">
-    <form method="GET" action="{{ route('activity-logs.index') }}" class="flex flex-wrap gap-2">
-        <input type="text" name="action" value="{{ request('action') }}" placeholder="Acción" class="rounded-md border-gray-300 shadow-sm sm:text-sm">
-        <input type="date" name="from" value="{{ request('from') }}" class="rounded-md border-gray-300 shadow-sm sm:text-sm">
-        <input type="date" name="to" value="{{ request('to') }}" class="rounded-md border-gray-300 shadow-sm sm:text-sm">
-        <button type="submit" class="rounded-md bg-gray-200 px-3 py-2 text-sm font-medium text-[#555555] hover:bg-gray-300">Filtrar</button>
+    <form method="GET" action="{{ route('activity-logs.index') }}" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <input type="text" name="action" value="{{ request('action') }}" placeholder="Acción" class="w-full rounded-md border-gray-300 shadow-sm sm:text-sm">
+        <input type="date" name="from" value="{{ request('from') }}" class="w-full rounded-md border-gray-300 shadow-sm sm:text-sm">
+        <input type="date" name="to" value="{{ request('to') }}" class="w-full rounded-md border-gray-300 shadow-sm sm:text-sm">
+        <button type="submit" class="btn-secondary">Filtrar</button>
     </form>
 
     <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">

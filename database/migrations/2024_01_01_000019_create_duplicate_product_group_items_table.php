@@ -1,0 +1,24 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('duplicate_product_group_items', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('duplicate_product_group_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('normalized_product_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('master_product_id')->nullable()->constrained()->nullOnDelete();
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('duplicate_product_group_items');
+    }
+};

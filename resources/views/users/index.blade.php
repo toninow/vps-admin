@@ -7,18 +7,18 @@
 <div class="space-y-4">
     @can('users.create')
         <div class="flex justify-end">
-            <a href="{{ route('users.create') }}" class="rounded-md bg-[#E6007E] px-4 py-2 text-sm font-medium text-white hover:bg-pink-700">Nuevo usuario</a>
+            <a href="{{ route('users.create') }}" class="btn-primary w-full sm:w-auto">Nuevo usuario</a>
         </div>
     @endcan
 
-    <form method="GET" action="{{ route('users.index') }}" class="flex flex-wrap gap-2">
-        <input type="text" name="search" value="{{ request('search') }}" placeholder="Buscar..." class="rounded-md border-gray-300 shadow-sm focus:border-[#E6007E] focus:ring-[#E6007E] sm:text-sm">
-        <select name="status" class="rounded-md border-gray-300 sm:text-sm">
+    <form method="GET" action="{{ route('users.index') }}" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <input type="text" name="search" value="{{ request('search') }}" placeholder="Buscar..." class="w-full rounded-md border-gray-300 shadow-sm focus:border-[#E6007E] focus:ring-[#E6007E] sm:text-sm">
+        <select name="status" class="w-full rounded-md border-gray-300 sm:text-sm">
             <option value="">Todos los estados</option>
             <option value="active" {{ request('status') === 'active' ? 'selected' : '' }}>Activo</option>
             <option value="inactive" {{ request('status') === 'inactive' ? 'selected' : '' }}>Inactivo</option>
         </select>
-        <button type="submit" class="rounded-md bg-gray-200 px-3 py-2 text-sm font-medium text-[#555555] hover:bg-gray-300">Filtrar</button>
+        <button type="submit" class="btn-secondary">Filtrar</button>
     </form>
 
     <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">

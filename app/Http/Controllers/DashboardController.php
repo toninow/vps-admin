@@ -15,10 +15,10 @@ class DashboardController extends Controller
 
         $totalUsers = User::count();
         $activeUsers = User::where('status', 'active')->count();
-        $totalProjects = Project::count();
-        $activeProjects = Project::where('status', 'active')->count();
+        $totalProjects = Project::query()->visibleInAdmin()->count();
+        $activeProjects = Project::query()->visibleInAdmin()->where('status', 'active')->count();
 
-        $projectsQuery = Project::query();
+        $projectsQuery = Project::query()->visibleInAdmin();
         if (! $user->can('projects.view')) {
             $projectsQuery->whereHas('users', fn ($q) => $q->where('users.id', $user->id));
         }

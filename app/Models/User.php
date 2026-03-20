@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\MpsfpAccess;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -46,8 +47,58 @@ class User extends Authenticatable
         return $this->hasMany(ActivityLog::class);
     }
 
+    public function supplierImports()
+    {
+        return $this->hasMany(SupplierImport::class);
+    }
+
+    public function stockChanges()
+    {
+        return $this->hasMany(StockChange::class);
+    }
+
+    public function approvedMasterProducts()
+    {
+        return $this->hasMany(MasterProduct::class, 'approved_by_id');
+    }
+
+    public function resolvedEanIssues()
+    {
+        return $this->hasMany(ProductEanIssue::class, 'resolved_by_id');
+    }
+
+    public function appDevices()
+    {
+        return $this->hasMany(AppDevice::class);
+    }
+
+    public function userSessions()
+    {
+        return $this->hasMany(UserSession::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+
+    public function canAccessMpsfp(): bool
+    {
+        return MpsfpAccess::canAccessModule($this);
+    }
+
+    public function canAccessMpsfpSection(string $section, string $ability = 'view'): bool
+    {
+        return MpsfpAccess::can($this, $section, $ability);
+    }
+
+    public function mpsfpCapabilities(): array
+    {
+        return MpsfpAccess::capabilities($this);
+    }
+
+    public function mpsfpPrimaryRole(): string
+    {
+        return MpsfpAccess::primaryRoleName($this);
     }
 }

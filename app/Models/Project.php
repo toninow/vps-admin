@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 
 class Project extends Model
 {
@@ -36,6 +37,11 @@ class Project extends Model
         'has_api' => 'boolean',
         'main_endpoints' => 'array',
     ];
+
+    public function scopeVisibleInAdmin(Builder $query): Builder
+    {
+        return $query->where('slug', '!=', 'proyecto-inicial');
+    }
 
     public function users()
     {

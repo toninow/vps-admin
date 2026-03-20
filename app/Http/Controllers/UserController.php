@@ -69,8 +69,17 @@ class UserController extends Controller
     public function show(User $user)
     {
         $this->authorize('view', $user);
-        $user->load('roles', 'projects');
-        return view('users.show', compact('user'));
+        $user->load([
+            'roles',
+            'projects' => fn ($query) => $query->visibleInAdmin()->orderBy('name'),
+        ]);
+
+        $recentActivity = $user->activityLogs()
+            ->latest()
+            ->take(8)
+            ->get();
+
+        return view('users.show', compact('user', 'recentActivity'));
     }
 
     public function edit(User $user)

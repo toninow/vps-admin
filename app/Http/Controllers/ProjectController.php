@@ -6,7 +6,6 @@ use App\Models\ActivityLog;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class ProjectController extends Controller
@@ -15,10 +14,16 @@ class ProjectController extends Controller
     {
         $this->authorize('viewAny', Project::class);
 
-        $query = Project::query();
+        $query = Project::query()->visibleInAdmin();
         $user = $request->user();
         if (! $user->can('projects.view')) {
-            $query->whereHas('users', fn ($q) => $q->where('users.id', $user->id));
+            $query->where(function ($projectQuery) use ($user) {
+                $projectQuery->whereHas('users', fn ($q) => $q->where('users.id', $user->id));
+
+                if ($user->canAccessMpsfp()) {
+                    $projectQuery->orWhere('slug', 'mpsfp');
+                }
+            });
         }
         $query->when($request->filled('status'), fn ($q) => $q->where('status', $request->status));
         $query->when($request->filled('search'), fn ($q) => $q->where('name', 'like', '%' . $request->search . '%'));
@@ -26,7 +31,6 @@ class ProjectController extends Controller
 
         return view('projects.index', compact('projects'));
     }
-
     public function create()
     {
         $this->authorize('create', Project::class);
@@ -88,7 +92,13 @@ class ProjectController extends Controller
     public function show(Project $project)
     {
         $this->authorize('view', $project);
+
+        if ($project->slug === 'mpsfp') {
+            return redirect()->route('projects.mpsfp.dashboard', $project);
+        }
+
         $project->load('users', 'mobileIntegrations');
+
         return view('projects.show', compact('project'));
     }
 

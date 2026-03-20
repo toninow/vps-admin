@@ -33,6 +33,50 @@
         </dl>
     </div>
 
+    @if ($project->slug === 'mpsfp')
+        <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Submódulo del proyecto</p>
+                    <h3 class="mt-2 text-base font-semibold text-[#555555]">MPSFP se gestiona desde su panel propio</h3>
+                    <p class="mt-1 max-w-3xl text-sm text-gray-500">Esta pantalla es solo la ficha/configuración del proyecto dentro de `Proyectos`. El trabajo operativo de proveedores, importaciones, productos generados, maestros y exportación vive exclusivamente dentro del submódulo `MPSFP`.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Sync: {{ $project->sync_status ?? '—' }}</span>
+                    @if ($project->backend_version)
+                        <span class="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">Backend: {{ $project->backend_version }}</span>
+                    @endif
+                </div>
+            </div>
+            <div class="mt-5 grid gap-4 lg:grid-cols-3">
+                <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Aquí sí</p>
+                    <p class="mt-2 text-sm font-semibold text-[#555555]">Ficha del proyecto</p>
+                    <p class="mt-1 text-sm text-gray-600">URLs, framework, usuarios asignados, integraciones móviles y configuración general del proyecto.</p>
+                </div>
+                <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Aquí no</p>
+                    <p class="mt-2 text-sm font-semibold text-[#555555]">Trabajo operativo diario</p>
+                    <p class="mt-1 text-sm text-gray-600">Proveedores, importaciones, normalización, catálogo maestro, incidencias y exportación no se gestionan ya en esta ficha.</p>
+                </div>
+                <div class="rounded-xl border border-[#E6007E]/20 bg-[#FFF7FB] p-4">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-[#E6007E]">Entrada correcta</p>
+                    <p class="mt-2 text-sm font-semibold text-[#555555]">Usa el submódulo MPSFP</p>
+                    <p class="mt-1 text-sm text-gray-600">Desde ahí verás la navegación propia del módulo y todas sus secciones operativas.</p>
+                </div>
+            </div>
+
+            <div class="mt-6 flex flex-wrap gap-2">
+                <a href="{{ route('projects.mpsfp.dashboard', $project) }}" class="btn-primary">Entrar al submódulo MPSFP</a>
+                <a href="{{ route('projects.mpsfp.normalized.index', $project) }}" class="btn-secondary">Ver productos generados</a>
+                <a href="{{ route('projects.mpsfp.imports.index', $project) }}" class="btn-secondary">Ver importaciones</a>
+            </div>
+            <p class="mt-3 text-sm text-gray-500">
+                La ficha del proyecto y el submódulo tienen propósitos distintos. Desde aquí solo entras y configuras; dentro de `MPSFP` trabajas.
+            </p>
+        </div>
+    @endif
+
     <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
         <h3 class="text-sm font-semibold text-[#555555] mb-3">Usuarios con acceso</h3>
         @if ($project->users->isEmpty())
